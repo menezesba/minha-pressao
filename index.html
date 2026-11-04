@@ -21,7 +21,6 @@
 <section id="dados" class="tab hidden"><div class="panel"><h2>Meus dados pessoais</h2><p class="hint">Preencha uma vez. Seus dados ficam salvos neste aparelho e aparecem no cabeçalho do PDF.</p><div class="field"><label for="pname">Nome completo</label><input id="pname" autocomplete="name" placeholder="Digite seu nome"></div><div class="grid"><div class="field"><label for="page">Idade (anos)</label><input id="page" type="number" min="1" max="120" placeholder="Ex.: 57"></div><div class="field"><label for="pweight">Peso (kg)</label><input id="pweight" type="number" min="1" max="500" step="0.1" placeholder="Ex.: 82"></div></div><div class="field"><label for="pheight">Altura (cm)</label><input id="pheight" type="number" min="50" max="250" step="0.1" placeholder="Ex.: 176"></div><button class="btn primary" onclick="saveProfile()">Salvar meus dados</button></div></section>
 <section id="relatorio" class="tab hidden"><div class="panel no-print"><h2>Gerar relatório PDF</h2><p class="hint">Escolha o intervalo e toque em gerar. O aplicativo criará um arquivo PDF para salvar no celular e compartilhar. Os dados pessoais salvos aparecerão no cabeçalho.</p><div class="grid"><div class="field"><label for="rfrom">Data inicial</label><input id="rfrom" type="date"></div><div class="field"><label for="rto">Data final</label><input id="rto" type="date"></div></div><button class="btn primary" onclick="makeReport()">⬇️ Gerar e salvar PDF</button><div class="actions"><button class="btn soft" onclick="backup()">⬇️ Backup</button><button class="btn soft" onclick="document.getElementById('restoreFile').click()">♻️ Restaurar backup</button></div><input id="restoreFile" type="file" accept=".json,application/json" class="hidden" onchange="restoreBackup(event)"></div><div class="report" id="report"><h1>Relatório de pressão arterial</h1><div id="rsubtitle"></div><div class="patient" id="rpatient"></div><div id="rsummary"></div><div id="ranalysis"></div><h2>Registros completos</h2><table class="reportTable"><thead><tr><th>Data</th><th>Hora</th><th>Período</th><th>Condição</th><th>Pressão (mmHg)</th><th>Pulso (bpm)</th><th>Observações</th></tr></thead><tbody id="rrows"></tbody></table><p class="reportNote">Este documento registra as medições informadas pelo usuário. As médias e faixas são dados de acompanhamento, não estabelecem diagnóstico. A interpretação deve ser feita por profissional de saúde, considerando o protocolo de medição e o tratamento em uso.</p></div></section>
 <footer>Os dados ficam neste navegador e aparelho. Exporte uma cópia de segurança regularmente.</footer></main>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
 <script>
 const RK='minhaPressao_registros_v2',PK='minhaPressao_perfil_v2';let data=read(RK,[]),profile=read(PK,{}),p='Manhã',edit=null,lastAnalysis=null;
 const $=id=>document.getElementById(id);function read(k,d){try{return JSON.parse(localStorage.getItem(k)||JSON.stringify(d))}catch(e){return d}}
@@ -67,19 +66,72 @@ function analyze(){
  lastAnalysis={from,to,records:a,mean:m,restMean:mr,groups};
 }
 function makeReport(){
- if(!window.jspdf||!window.jspdf.jsPDF){
-  alert('Não foi possível carregar o gerador de PDF. Verifique sua conexão com a internet e tente novamente.');
-  return;
- }
  let from=$('rfrom').value,to=$('rto').value;
  if(from&&to&&from>to){alert('A data inicial deve ser anterior à final.');return}
- let a=data.filter(r=>(!from||r.date>=from)&&(!to||r.date<=to)).sort((x,y)=>(x.date+x.time).localeCompare(y.date+y.time));
+ const a=data.filter(r=>(!from||r.date>=from)&&(!to||r.date<=to)).sort((x,y)=>(x.date+x.time).localeCompare(y.date+y.time));
  if(!a.length){alert('Não há medições no intervalo selecionado.');return}
 
- const {jsPDF}=window.jspdf;
- const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
- const W=210, H=297, L=14, R=14, usable=W-L-R;
- let y=18, page=1;
+ // Gerador PDF interno: não depende de bibliotecas ou serviços externos.
+ const W=595.28,H=841.89,M=42,usable=W-2*M;
+ const pages=[];let ops=[],y=H-48;
+ const cp1252={
+  '€':128,'‚':130,'ƒ':131,'„':132,'…':133,'†':134,'‡':135,'ˆ':136,'‰':137,'Š':138,'‹':139,'Œ':140,'Ž':142,
+  '‘':145,'’':146,'“':147,'”':148,'•':149,'–':150,'—':151,'˜':152,'™':153,'š':154,'›':155,'œ':156,'ž':158,'Ÿ':159
+ };
+ function hexText(v){
+  let out='';
+  for(const ch of String(v??'')){
+   let c=ch.codePointAt(0);
+   if(cp1252[ch]!==undefined)c=cp1252[ch];
+   else if(c>255)c=63;
+   out+=c.toString(16).padStart(2,'0');
+  }
+  return out.toUpperCase();
+ }
+ function add(s){ops.push(s)}
+ function color(r,g,b){return `${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)}`}
+ function txt(str,x,yy,size=9,bold=false,rgb=[.14,.20,.19]){
+  add(`BT /${bold?'F2':'F1'} ${size} Tf ${color(...rgb)} rg 1 0 0 1 ${x.toFixed(2)} ${yy.toFixed(2)} Tm <${hexText(str)}> Tj ET`);
+ }
+ function rect(x,yy,w,h,fill,stroke=null){
+  if(fill)add(`${color(...fill)} rg ${x} ${yy} ${w} ${h} re f`);
+  if(stroke)add(`${color(...stroke)} RG 0.6 w ${x} ${yy} ${w} ${h} re S`);
+ }
+ function line(x1,y1,x2,y2,rgb=[.82,.87,.85],width=.6){
+  add(`${color(...rgb)} RG ${width} w ${x1} ${y1} m ${x2} ${y2} l S`);
+ }
+ function newPage(){
+  if(ops.length)pages.push(ops.join('\n'));
+  ops=[];y=H-48;
+ }
+ function ensure(h){
+  if(y-h<55)newPage();
+ }
+ function wrap(str,maxChars){
+  const words=String(str??'').split(/\s+/);let lines=[],cur='';
+  for(const word of words){const test=cur?cur+' '+word:word;if(test.length>maxChars&&cur){lines.push(cur);cur=word}else cur=test}
+  if(cur)lines.push(cur);return lines;
+ }
+ function paragraph(str,size=9,maxWidth=usable,bold=false,colorRgb=[.14,.20,.19]){
+  const chars=Math.max(18,Math.floor(maxWidth/(size*.52)));
+  const lines=wrap(str,chars);ensure(lines.length*(size+4)+3);
+  lines.forEach((v,i)=>{txt(v,M,y,size,bold,colorRgb);y-=size+4});
+  y-=3;
+ }
+ function section(title){
+  ensure(28);y-=5;line(M,y,M+usable,y,[.06,.46,.43],1.4);y-=18;txt(title,M,y,12,true,[.07,.37,.35]);y-=17;
+ }
+ function table(headers,rows,widths){
+  ensure(25);rect(M,y-5,usable,19,[.89,.95,.94]);let x=M;
+  headers.forEach((h,i)=>{txt(h,x+4,y,8,true,[.12,.24,.22]);x+=widths[i]});
+  y-=20;
+  rows.forEach(row=>{
+   ensure(19);x=M;
+   row.forEach((v,i)=>{txt(String(v).slice(0,42),x+4,y,8,false,[.16,.21,.20]);x+=widths[i]});
+   line(M,y-5,M+usable,y-5,[.88,.90,.89],.4);y-=18;
+  });
+  y-=5;
+ }
  const rest=a.filter(r=>(r.condition||'').toLowerCase()==='repouso');
  const m=mean(a),mr=mean(rest);
  const groups=['Manhã','Tarde','Noite'].map(k=>({name:k,items:a.filter(r=>r.period===k),avg:mean(a.filter(r=>r.period===k))}));
@@ -88,131 +140,87 @@ function makeReport(){
  const above=a.filter(r=>Number(r.sys)>=130||Number(r.dia)>=80).length;
  const days=[...new Set(a.map(r=>r.date))].sort();
  const daily=days.map(d=>({date:d,avg:mean(a.filter(r=>r.date===d))}));
- const profileNow=read(PK,{});
- const fmtDate=s=>s?fmt(s):'Não informado';
- const addPage=()=>{doc.addPage();page++;y=17;};
- const ensure=(h)=>{if(y+h>H-17)addPage();};
- const text=(str,x,yy,size=9,style='normal',color=[35,51,49],opts={})=>{
-  doc.setFont('helvetica',style);doc.setFontSize(size);doc.setTextColor(...color);
-  doc.text(String(str),x,yy,opts);
- };
- const wrapped=(str,x,yy,maxWidth,size=9,style='normal',color=[35,51,49],lineGap=4.2)=>{
-  doc.setFont('helvetica',style);doc.setFontSize(size);doc.setTextColor(...color);
-  const lines=doc.splitTextToSize(String(str),maxWidth);
-  lines.forEach((line,i)=>text(line,x,yy+i*lineGap,size,style,color));
-  return yy+lines.length*lineGap;
- };
- const section=(title)=>{
-  ensure(13);y+=3;
-  doc.setDrawColor(15,118,110);doc.setLineWidth(.6);doc.line(L,y,W-R,y);
-  y+=7;text(title,L,y,12,'bold',[17,94,89]);y+=5;
- };
- const cell=(str,x,yy,w,align='left',bold=false)=>{
-  text(str,align==='right'?x+w:x,yy,8,bold?'bold':'normal',[35,51,49],align==='right'?{align:'right'}:{});
- };
- const table=(headers,rows,widths)=>{
-  const rowH=7;ensure(12);
-  doc.setFillColor(229,243,241);doc.rect(L,y-4,usable,8,'F');
-  let x=L;headers.forEach((h,i)=>{cell(h,x,y,widths[i],'left',true);x+=widths[i]});
-  y+=5;
-  rows.forEach(row=>{
-   ensure(rowH+2);x=L;
-   doc.setDrawColor(220,228,226);doc.setLineWidth(.2);doc.line(L,y+2,W-R,y+2);
-   row.forEach((v,i)=>{cell(v,x,y,widths[i]);x+=widths[i]});
-   y+=rowH;
-  });
-  y+=2;
- };
+ const prof=read(PK,{});
  // Cabeçalho
- doc.setFillColor(17,94,89);doc.roundedRect(L,12,usable,25,3,3,'F');
- text('MINHA PRESSÃO',L+6,22,17,'bold',[255,255,255]);
- text('Relatório de acompanhamento da pressão arterial',L+6,30,8,'normal',[230,248,245]);
- y=45;
- text('Paciente: '+(profileNow.name||'Não informado'),L,y,9,'bold');y+=5;
- text('Idade: '+(profileNow.age?profileNow.age+' anos':'Não informada')+'   Peso: '+(profileNow.weight?profileNow.weight+' kg':'Não informado')+'   Altura: '+(profileNow.height?profileNow.height+' cm':'Não informada'),L,y,8);y+=5;
- text('Período: '+(from?fmtDate(from):'todos os registros')+' até '+(to?fmtDate(to):'hoje'),L,y,8);y+=5;
- text('Gerado em: '+fmt(today())+' às '+nowtime(),L,y,8,[90,110,106]);y+=5;
+ rect(M,H-105,usable,62,[.07,.37,.35]);
+ txt('MINHA PRESSAO',M+16,H-68,20,true,[1,1,1]);
+ txt('Relatorio de acompanhamento da pressao arterial',M+16,H-88,9,false,[.91,.97,.96]);
+ y=H-127;
+ txt('Paciente: '+(prof.name||'Nao informado'),M,y,9,true);y-=15;
+ txt('Idade: '+(prof.age?prof.age+' anos':'Nao informada')+'   Peso: '+(prof.weight?prof.weight+' kg':'Nao informado')+'   Altura: '+(prof.height?prof.height+' cm':'Nao informada'),M,y,8);y-=14;
+ txt('Periodo: '+(from?fmt(from):'todos os registros')+' ate '+(to?fmt(to):'hoje')+'    Gerado em: '+fmt(today())+' '+nowtime(),M,y,8);y-=15;
 
- section('Resumo das medições');
- const cards=[
-  ['MÉDIA GERAL',meanText(m)],
-  ['MÉDIA EM REPOUSO',meanText(mr)],
-  ['TOTAL DE MEDIÇÕES',String(a.length)],
-  ['DIAS COM REGISTROS',String(days.length)]
- ];
- const gap=4,cw=(usable-gap)/2,ch=17;
- cards.forEach((c,i)=>{
-  const col=i%2,row=Math.floor(i/2),x=L+col*(cw+gap),yy=y+row*(ch+3);
-  doc.setFillColor(239,247,246);doc.setDrawColor(210,226,222);doc.roundedRect(x,yy,cw,ch,2,2,'FD');
-  text(c[0],x+3,yy+6,6.5,'bold',[83,108,103]);text(c[1],x+3,yy+13,12,'bold',[17,94,89]);
- });
- y+=2*(ch+3)+2;
+ section('Resumo das medicoes');
+ const cards=[['MEDIA GERAL',meanText(m)],['MEDIA EM REPOUSO',meanText(mr)],['TOTAL DE MEDICOES',String(a.length)],['DIAS COM REGISTROS',String(days.length)]];
+ const gap=10,cw=(usable-gap)/2,ch=43;
+ cards.forEach((c,i)=>{const xx=M+(i%2)*(cw+gap),yy=y-Math.floor(i/2)*(ch+8)-ch+8;rect(xx,yy,cw,ch,[.93,.97,.96],[.82,.89,.87]);txt(c[0],xx+10,yy+26,7,true,[.32,.42,.40]);txt(c[1],xx+10,yy+9,14,true,[.07,.37,.35])});
+ y-=2*(ch+8)+4;
 
- section('Médias por período do dia');
- table(['Período','Registros','Média (mmHg)'],groups.map(g=>[g.name,String(g.items.length),meanText(g.avg)]),[65,40,usable-105]);
+ section('Medias por periodo do dia');
+ table(['Periodo','Registros','Media (mmHg)'],groups.map(g=>[g.name,String(g.items.length),meanText(g.avg)]),[220,110,usable-330]);
 
- section('Indicadores estatísticos');
+ section('Indicadores estatisticos');
  table(['Indicador','Resultado'],[
-  ['Maior pressão sistólica',maxSys+' mmHg'],
-  ['Menor pressão sistólica',minSys+' mmHg'],
-  ['Maior pressão diastólica',maxDia+' mmHg'],
-  ['Menor pressão diastólica',minDia+' mmHg'],
-  ['Sistólica ≥ 130 ou diastólica ≥ 80',above+' de '+a.length+' registros'],
-  ['Medições marcadas como repouso',String(rest.length)]
- ],[usable*.68,usable*.32]);
+  ['Maior sistolica',maxSys+' mmHg'],['Menor sistolica',minSys+' mmHg'],
+  ['Maior diastolica',maxDia+' mmHg'],['Menor diastolica',minDia+' mmHg'],
+  ['Sistolica >= 130 ou diastolica >= 80',above+' de '+a.length+' registros'],
+  ['Medicoes marcadas como repouso',String(rest.length)]
+ ],[usable*.69,usable*.31]);
 
- section('Evolução diária das médias');
- text('Barras verdes: sistólica. Barras azuis: diastólica. Valores em mmHg.',L,y,7.5,'normal',[80,98,94]);y+=7;
+ section('Evolucao diaria das medias');
+ txt('Verde: sistolica. Azul: diastolica. Valores em mmHg.',M,y,8,false,[.35,.42,.40]);y-=17;
  const chartMax=Math.max(180,...daily.map(d=>Math.max(d.avg.sys,d.avg.dia)));
- const labelW=23,valW=18,barW=usable-labelW-valW-3,barH=3.2,rowGap=8.5;
+ const barX=M+72,barW=usable-145;
  daily.forEach(d=>{
-  ensure(rowGap+2);
-  text(fmt(d.date),L,y+2.8,7.2,'normal',[45,63,59]);
-  const bx=L+labelW;
-  doc.setFillColor(235,240,239);doc.rect(bx,y,barW,barH,'F');
-  doc.setFillColor(22,131,111);doc.rect(bx,y,barW*d.avg.sys/chartMax,barH,'F');
-  doc.setFillColor(235,240,239);doc.rect(bx,y+4,barW,barH,'F');
-  doc.setFillColor(52,120,200);doc.rect(bx,y+4,barW*d.avg.dia/chartMax,barH,'F');
-  text(Math.round(d.avg.sys)+'/'+Math.round(d.avg.dia),W-R,y+5.8,7,'bold',[35,51,49],{align:'right'});
-  y+=rowGap;
+  ensure(26);
+  txt(fmt(d.date),M,y+1,7.5,false);
+  rect(barX,y-1,barW,7,[.91,.93,.93]);rect(barX,y-1,barW*d.avg.sys/chartMax,7,[.08,.51,.44]);
+  rect(barX,y-11,barW,7,[.91,.93,.93]);rect(barX,y-11,barW*d.avg.dia/chartMax,7,[.20,.47,.78]);
+  txt(Math.round(d.avg.sys)+'/'+Math.round(d.avg.dia),barX+barW+8,y-5,7,true);
+  y-=23;
  });
- y+=2;
-
- section('Observação para avaliação médica');
+ y-=7;
+ section('Observacao para avaliacao medica');
  const interpretation=(m.sys>=130||m.dia>=80)
-  ?'A média geral deste conjunto atingiu ou ultrapassou 130/80 mmHg, referência utilizada em avaliações domiciliares padronizadas. Leve este resultado à médica para interpretação.'
-  :'A média geral deste conjunto ficou abaixo de 130/80 mmHg. Esse resultado isolado não exclui hipertensão e deve ser interpretado pela médica conforme o protocolo utilizado.';
- y=wrapped(interpretation,L,y,usable,8,'normal',[35,51,49],4.1)+2;
- y=wrapped('A referência de 130/80 mmHg é aplicável a avaliações domiciliares padronizadas, como a MRPA. Este relatório reúne os registros do aplicativo e não substitui um exame realizado conforme protocolo, nem estabelece diagnóstico. A interpretação deve considerar técnica de aferição, horários, repouso, medicamentos e histórico clínico.',L,y,usable,7.5,'normal',[80,98,94],3.8)+2;
+  ?'A media geral deste conjunto atingiu ou ultrapassou 130/80 mmHg, referencia utilizada em avaliacoes domiciliares padronizadas. Leve este resultado a medica para interpretacao.'
+  :'A media geral deste conjunto ficou abaixo de 130/80 mmHg. Esse resultado isolado nao exclui hipertensao e deve ser interpretado pela medica conforme o protocolo utilizado.';
+ paragraph(interpretation,8);
+ paragraph('A referencia de 130/80 mmHg e aplicavel a avaliacoes domiciliares padronizadas, como a MRPA. Este relatorio reune os registros do aplicativo e nao substitui um exame realizado conforme protocolo, nem estabelece diagnostico. A interpretacao deve considerar tecnica de afericao, horarios, repouso, medicamentos e historico clinico.',7.5);
 
  section('Registros completos');
- const headers=['Data','Hora','Período','Condição','Pressão','Pulso','Observações'];
- const widths=[22,13,19,25,20,17,usable-116];
- const rowHeight=7;
- // Cabeçalho da tabela repetido quando houver quebra de página.
- const drawTableHeader=()=>{
-  ensure(11);doc.setFillColor(229,243,241);doc.rect(L,y-4,usable,8,'F');
-  let x=L;headers.forEach((h,i)=>{cell(h,x,y,widths[i],'left',true);x+=widths[i]});y+=5;
- };
- drawTableHeader();
+ table(['Data','Hora','Periodo','Condicao','Pressao','Pulso'],a.map(r=>[fmt(r.date),r.time,r.period||'',r.condition||'Nao informada',r.sys+'/'+r.dia,r.pulse==null?'--':String(r.pulse)]),[76,48,82,110,76,usable-392]);
  a.forEach(r=>{
-  const obs=String(r.notes||'').replace(/\s+/g,' ').slice(0,75);
-  const vals=[fmt(r.date),r.time,r.period||'',r.condition||'Não informada',r.sys+'/'+r.dia,r.pulse==null?'--':String(r.pulse),obs];
-  ensure(rowHeight+2);
-  if(y===17)drawTableHeader();
-  let x=L;vals.forEach((v,i)=>{cell(v,x,y,widths[i]);x+=widths[i]});
-  doc.setDrawColor(225,231,229);doc.line(L,y+2,W-R,y+2);y+=rowHeight;
+  if(r.notes){ensure(18);paragraph('Observacao '+fmt(r.date)+' '+r.time+': '+r.notes,7.5);}
  });
- // Rodapé e numeração de páginas.
- const total=doc.getNumberOfPages();
- for(let i=1;i<=total;i++){
-  doc.setPage(i);doc.setDrawColor(210,220,217);doc.line(L,H-12,W-R,H-12);
-  text('Minha Pressão • Documento de acompanhamento, não diagnóstico',L,H-7,7,'normal',[100,115,111]);
-  text(i+' / '+total,W-R,H-7,7,'normal',[100,115,111],{align:'right'});
- }
- const filename='relatorio-minha-pressao-'+(from||'inicio')+'-'+(to||today())+'.pdf';
- doc.save(filename);
- alert('PDF gerado. Verifique a pasta Downloads do celular para abrir ou compartilhar o arquivo.');
+ if(ops.length)pages.push(ops.join('\n'));
+
+ // Monta o PDF usando apenas objetos PDF padrao e fontes internas.
+ const objects=[];
+ const reserve=()=>{objects.push('');return objects.length};
+ const set=(id,v)=>objects[id-1]=v;
+ const catalogId=reserve(),pagesId=reserve(),font1=reserve(),font2=reserve();
+ set(font1,'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+ set(font2,'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+ const pageIds=[];
+ pages.forEach(content=>{
+  const streamId=reserve(),pageId=reserve();pageIds.push(pageId);
+  const stream=content+'\n';
+  set(streamId,`<< /Length ${stream.length} >>\nstream\n${stream}endstream`);
+  set(pageId,`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 ${font1} 0 R /F2 ${font2} 0 R >> >> /Contents ${streamId} 0 R >>`);
+ });
+ set(pagesId,`<< /Type /Pages /Kids [${pageIds.map(id=>id+' 0 R').join(' ')}] /Count ${pageIds.length} >>`);
+ set(catalogId,`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
+ let pdf='%PDF-1.4\n%PDFGEN\n',offsets=[0];
+ objects.forEach((obj,i)=>{offsets.push(pdf.length);pdf+=(i+1)+' 0 obj\n'+obj+'\nendobj\n'});
+ const xref=pdf.length;pdf+='xref\n0 '+(objects.length+1)+'\n0000000000 65535 f \n';
+ for(let i=1;i<offsets.length;i++)pdf+=String(offsets[i]).padStart(10,'0')+' 00000 n \n';
+ pdf+='trailer\n<< /Size '+(objects.length+1)+' /Root '+catalogId+' 0 R >>\nstartxref\n'+xref+'\n%%EOF';
+ const blob=new Blob([pdf],{type:'application/pdf'});
+ const url=URL.createObjectURL(blob),link=document.createElement('a');
+ link.href=url;link.download='relatorio-minha-pressao-'+(from||'inicio')+'-'+(to||today())+'.pdf';
+ document.body.appendChild(link);link.click();link.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),60000);
+ alert('PDF criado. Abra a pasta Downloads do celular para visualizar ou compartilhar o relatório.');
 }
 function restoreBackup(event){
  const file=event.target.files&&event.target.files[0];if(!file)return;
