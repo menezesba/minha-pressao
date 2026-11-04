@@ -19,8 +19,9 @@
 <div id="analysisOutput"><div class="panel empty">Selecione um período e toque em “Calcular médias”.</div></div>
 </section>
 <section id="dados" class="tab hidden"><div class="panel"><h2>Meus dados pessoais</h2><p class="hint">Preencha uma vez. Seus dados ficam salvos neste aparelho e aparecem no cabeçalho do PDF.</p><div class="field"><label for="pname">Nome completo</label><input id="pname" autocomplete="name" placeholder="Digite seu nome"></div><div class="grid"><div class="field"><label for="page">Idade (anos)</label><input id="page" type="number" min="1" max="120" placeholder="Ex.: 57"></div><div class="field"><label for="pweight">Peso (kg)</label><input id="pweight" type="number" min="1" max="500" step="0.1" placeholder="Ex.: 82"></div></div><div class="field"><label for="pheight">Altura (cm)</label><input id="pheight" type="number" min="50" max="250" step="0.1" placeholder="Ex.: 176"></div><button class="btn primary" onclick="saveProfile()">Salvar meus dados</button></div></section>
-<section id="relatorio" class="tab hidden"><div class="panel no-print"><h2>Gerar relatório PDF</h2><p class="hint">Escolha o intervalo e toque em preparar. Na tela de impressão do Android, selecione “Salvar como PDF”. Os dados pessoais salvos aparecerão no cabeçalho.</p><div class="grid"><div class="field"><label for="rfrom">Data inicial</label><input id="rfrom" type="date"></div><div class="field"><label for="rto">Data final</label><input id="rto" type="date"></div></div><button class="btn primary" onclick="makeReport()">Preparar relatório PDF</button><div class="actions"><button class="btn soft" onclick="backup()">⬇️ Backup</button><button class="btn soft" onclick="document.getElementById('restoreFile').click()">♻️ Restaurar backup</button></div><input id="restoreFile" type="file" accept=".json,application/json" class="hidden" onchange="restoreBackup(event)"></div><div class="report" id="report"><h1>Relatório de pressão arterial</h1><div id="rsubtitle"></div><div class="patient" id="rpatient"></div><div id="rsummary"></div><div id="ranalysis"></div><h2>Registros completos</h2><table class="reportTable"><thead><tr><th>Data</th><th>Hora</th><th>Período</th><th>Condição</th><th>Pressão (mmHg)</th><th>Pulso (bpm)</th><th>Observações</th></tr></thead><tbody id="rrows"></tbody></table><p class="reportNote">Este documento registra as medições informadas pelo usuário. As médias e faixas são dados de acompanhamento, não estabelecem diagnóstico. A interpretação deve ser feita por profissional de saúde, considerando o protocolo de medição e o tratamento em uso.</p></div></section>
+<section id="relatorio" class="tab hidden"><div class="panel no-print"><h2>Gerar relatório PDF</h2><p class="hint">Escolha o intervalo e toque em gerar. O aplicativo criará um arquivo PDF para salvar no celular e compartilhar. Os dados pessoais salvos aparecerão no cabeçalho.</p><div class="grid"><div class="field"><label for="rfrom">Data inicial</label><input id="rfrom" type="date"></div><div class="field"><label for="rto">Data final</label><input id="rto" type="date"></div></div><button class="btn primary" onclick="makeReport()">⬇️ Gerar e salvar PDF</button><div class="actions"><button class="btn soft" onclick="backup()">⬇️ Backup</button><button class="btn soft" onclick="document.getElementById('restoreFile').click()">♻️ Restaurar backup</button></div><input id="restoreFile" type="file" accept=".json,application/json" class="hidden" onchange="restoreBackup(event)"></div><div class="report" id="report"><h1>Relatório de pressão arterial</h1><div id="rsubtitle"></div><div class="patient" id="rpatient"></div><div id="rsummary"></div><div id="ranalysis"></div><h2>Registros completos</h2><table class="reportTable"><thead><tr><th>Data</th><th>Hora</th><th>Período</th><th>Condição</th><th>Pressão (mmHg)</th><th>Pulso (bpm)</th><th>Observações</th></tr></thead><tbody id="rrows"></tbody></table><p class="reportNote">Este documento registra as medições informadas pelo usuário. As médias e faixas são dados de acompanhamento, não estabelecem diagnóstico. A interpretação deve ser feita por profissional de saúde, considerando o protocolo de medição e o tratamento em uso.</p></div></section>
 <footer>Os dados ficam neste navegador e aparelho. Exporte uma cópia de segurança regularmente.</footer></main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
 <script>
 const RK='minhaPressao_registros_v2',PK='minhaPressao_perfil_v2';let data=read(RK,[]),profile=read(PK,{}),p='Manhã',edit=null,lastAnalysis=null;
 const $=id=>document.getElementById(id);function read(k,d){try{return JSON.parse(localStorage.getItem(k)||JSON.stringify(d))}catch(e){return d}}
@@ -66,11 +67,19 @@ function analyze(){
  lastAnalysis={from,to,records:a,mean:m,restMean:mr,groups};
 }
 function makeReport(){
+ if(!window.jspdf||!window.jspdf.jsPDF){
+  alert('Não foi possível carregar o gerador de PDF. Verifique sua conexão com a internet e tente novamente.');
+  return;
+ }
  let from=$('rfrom').value,to=$('rto').value;
  if(from&&to&&from>to){alert('A data inicial deve ser anterior à final.');return}
  let a=data.filter(r=>(!from||r.date>=from)&&(!to||r.date<=to)).sort((x,y)=>(x.date+x.time).localeCompare(y.date+y.time));
  if(!a.length){alert('Não há medições no intervalo selecionado.');return}
- profile=read(PK,{});
+
+ const {jsPDF}=window.jspdf;
+ const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+ const W=210, H=297, L=14, R=14, usable=W-L-R;
+ let y=18, page=1;
  const rest=a.filter(r=>(r.condition||'').toLowerCase()==='repouso');
  const m=mean(a),mr=mean(rest);
  const groups=['Manhã','Tarde','Noite'].map(k=>({name:k,items:a.filter(r=>r.period===k),avg:mean(a.filter(r=>r.period===k))}));
@@ -79,31 +88,131 @@ function makeReport(){
  const above=a.filter(r=>Number(r.sys)>=130||Number(r.dia)>=80).length;
  const days=[...new Set(a.map(r=>r.date))].sort();
  const daily=days.map(d=>({date:d,avg:mean(a.filter(r=>r.date===d))}));
- const scaleMax=Math.max(180,...daily.map(x=>Math.max(x.avg.sys,x.avg.dia)));
- const chartW=720, left=92, plotW=500, right=112, rowH=42, chartH=Math.max(54,daily.length*rowH+12);
- const svgRows=daily.map((x,i)=>{
-  const y=10+i*rowH, sw=Math.max(2,x.avg.sys/scaleMax*plotW), dw=Math.max(2,x.avg.dia/scaleMax*plotW);
-  return `<text x="0" y="${y+17}" font-size="13" fill="#243b38">${fmt(x.date)}</text><rect x="${left}" y="${y+3}" width="${plotW}" height="11" rx="4" fill="#e8eeee"/><rect x="${left}" y="${y+3}" width="${sw.toFixed(1)}" height="11" rx="4" fill="#16836f"/><rect x="${left}" y="${y+19}" width="${plotW}" height="11" rx="4" fill="#e8eeee"/><rect x="${left}" y="${y+19}" width="${dw.toFixed(1)}" height="11" rx="4" fill="#3478c8"/><text x="${left+plotW+12}" y="${y+13}" font-size="12" fill="#173331">${Math.round(x.avg.sys)}</text><text x="${left+plotW+12}" y="${y+29}" font-size="12" fill="#173331">${Math.round(x.avg.dia)}</text>`;
- }).join('');
- const dailyBars=`<div class="reportLegend"><span><i class="legendDot" style="background:#16836f"></i>Sistólica</span><span><i class="legendDot" style="background:#3478c8"></i>Diastólica</span></div><svg class="reportChart" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${chartW} ${chartH}" role="img" aria-label="Gráfico diário das médias sistólica e diastólica">${svgRows}</svg>`;
- const periodRows=groups.map(g=>`<tr><td>${g.name}</td><td>${g.items.length}</td><td>${meanText(g.avg)}</td></tr>`).join('');
+ const profileNow=read(PK,{});
+ const fmtDate=s=>s?fmt(s):'Não informado';
+ const addPage=()=>{doc.addPage();page++;y=17;};
+ const ensure=(h)=>{if(y+h>H-17)addPage();};
+ const text=(str,x,yy,size=9,style='normal',color=[35,51,49],opts={})=>{
+  doc.setFont('helvetica',style);doc.setFontSize(size);doc.setTextColor(...color);
+  doc.text(String(str),x,yy,opts);
+ };
+ const wrapped=(str,x,yy,maxWidth,size=9,style='normal',color=[35,51,49],lineGap=4.2)=>{
+  doc.setFont('helvetica',style);doc.setFontSize(size);doc.setTextColor(...color);
+  const lines=doc.splitTextToSize(String(str),maxWidth);
+  lines.forEach((line,i)=>text(line,x,yy+i*lineGap,size,style,color));
+  return yy+lines.length*lineGap;
+ };
+ const section=(title)=>{
+  ensure(13);y+=3;
+  doc.setDrawColor(15,118,110);doc.setLineWidth(.6);doc.line(L,y,W-R,y);
+  y+=7;text(title,L,y,12,'bold',[17,94,89]);y+=5;
+ };
+ const cell=(str,x,yy,w,align='left',bold=false)=>{
+  text(str,align==='right'?x+w:x,yy,8,bold?'bold':'normal',[35,51,49],align==='right'?{align:'right'}:{});
+ };
+ const table=(headers,rows,widths)=>{
+  const rowH=7;ensure(12);
+  doc.setFillColor(229,243,241);doc.rect(L,y-4,usable,8,'F');
+  let x=L;headers.forEach((h,i)=>{cell(h,x,y,widths[i],'left',true);x+=widths[i]});
+  y+=5;
+  rows.forEach(row=>{
+   ensure(rowH+2);x=L;
+   doc.setDrawColor(220,228,226);doc.setLineWidth(.2);doc.line(L,y+2,W-R,y+2);
+   row.forEach((v,i)=>{cell(v,x,y,widths[i]);x+=widths[i]});
+   y+=rowH;
+  });
+  y+=2;
+ };
+ // Cabeçalho
+ doc.setFillColor(17,94,89);doc.roundedRect(L,12,usable,25,3,3,'F');
+ text('MINHA PRESSÃO',L+6,22,17,'bold',[255,255,255]);
+ text('Relatório de acompanhamento da pressão arterial',L+6,30,8,'normal',[230,248,245]);
+ y=45;
+ text('Paciente: '+(profileNow.name||'Não informado'),L,y,9,'bold');y+=5;
+ text('Idade: '+(profileNow.age?profileNow.age+' anos':'Não informada')+'   Peso: '+(profileNow.weight?profileNow.weight+' kg':'Não informado')+'   Altura: '+(profileNow.height?profileNow.height+' cm':'Não informada'),L,y,8);y+=5;
+ text('Período: '+(from?fmtDate(from):'todos os registros')+' até '+(to?fmtDate(to):'hoje'),L,y,8);y+=5;
+ text('Gerado em: '+fmt(today())+' às '+nowtime(),L,y,8,[90,110,106]);y+=5;
+
+ section('Resumo das medições');
+ const cards=[
+  ['MÉDIA GERAL',meanText(m)],
+  ['MÉDIA EM REPOUSO',meanText(mr)],
+  ['TOTAL DE MEDIÇÕES',String(a.length)],
+  ['DIAS COM REGISTROS',String(days.length)]
+ ];
+ const gap=4,cw=(usable-gap)/2,ch=17;
+ cards.forEach((c,i)=>{
+  const col=i%2,row=Math.floor(i/2),x=L+col*(cw+gap),yy=y+row*(ch+3);
+  doc.setFillColor(239,247,246);doc.setDrawColor(210,226,222);doc.roundedRect(x,yy,cw,ch,2,2,'FD');
+  text(c[0],x+3,yy+6,6.5,'bold',[83,108,103]);text(c[1],x+3,yy+13,12,'bold',[17,94,89]);
+ });
+ y+=2*(ch+3)+2;
+
+ section('Médias por período do dia');
+ table(['Período','Registros','Média (mmHg)'],groups.map(g=>[g.name,String(g.items.length),meanText(g.avg)]),[65,40,usable-105]);
+
+ section('Indicadores estatísticos');
+ table(['Indicador','Resultado'],[
+  ['Maior pressão sistólica',maxSys+' mmHg'],
+  ['Menor pressão sistólica',minSys+' mmHg'],
+  ['Maior pressão diastólica',maxDia+' mmHg'],
+  ['Menor pressão diastólica',minDia+' mmHg'],
+  ['Sistólica ≥ 130 ou diastólica ≥ 80',above+' de '+a.length+' registros'],
+  ['Medições marcadas como repouso',String(rest.length)]
+ ],[usable*.68,usable*.32]);
+
+ section('Evolução diária das médias');
+ text('Barras verdes: sistólica. Barras azuis: diastólica. Valores em mmHg.',L,y,7.5,'normal',[80,98,94]);y+=7;
+ const chartMax=Math.max(180,...daily.map(d=>Math.max(d.avg.sys,d.avg.dia)));
+ const labelW=23,valW=18,barW=usable-labelW-valW-3,barH=3.2,rowGap=8.5;
+ daily.forEach(d=>{
+  ensure(rowGap+2);
+  text(fmt(d.date),L,y+2.8,7.2,'normal',[45,63,59]);
+  const bx=L+labelW;
+  doc.setFillColor(235,240,239);doc.rect(bx,y,barW,barH,'F');
+  doc.setFillColor(22,131,111);doc.rect(bx,y,barW*d.avg.sys/chartMax,barH,'F');
+  doc.setFillColor(235,240,239);doc.rect(bx,y+4,barW,barH,'F');
+  doc.setFillColor(52,120,200);doc.rect(bx,y+4,barW*d.avg.dia/chartMax,barH,'F');
+  text(Math.round(d.avg.sys)+'/'+Math.round(d.avg.dia),W-R,y+5.8,7,'bold',[35,51,49],{align:'right'});
+  y+=rowGap;
+ });
+ y+=2;
+
+ section('Observação para avaliação médica');
  const interpretation=(m.sys>=130||m.dia>=80)
   ?'A média geral deste conjunto atingiu ou ultrapassou 130/80 mmHg, referência utilizada em avaliações domiciliares padronizadas. Leve este resultado à médica para interpretação.'
   :'A média geral deste conjunto ficou abaixo de 130/80 mmHg. Esse resultado isolado não exclui hipertensão e deve ser interpretado pela médica conforme o protocolo utilizado.';
- $('rsubtitle').innerHTML='<b>Período:</b> '+(from?fmt(from):'todos os registros')+' até '+(to?fmt(to):'hoje')+'<br><b>Gerado em:</b> '+fmt(today())+' às '+nowtime();
- $('rpatient').innerHTML='<b>Dados do paciente</b><br><b>Nome:</b> '+esc(profile.name||'Não informado')+' &nbsp; | &nbsp; <b>Idade:</b> '+(profile.age?esc(profile.age)+' anos':'Não informada')+'<br><b>Peso:</b> '+(profile.weight?esc(profile.weight)+' kg':'Não informado')+' &nbsp; | &nbsp; <b>Altura:</b> '+(profile.height?esc(profile.height)+' cm':'Não informada');
- $('rsummary').innerHTML=`<div class="reportSection"><h2>Resumo das medições</h2><div class="reportStats"><div class="reportStat"><span>Média geral</span><b>${meanText(m)} mmHg</b></div><div class="reportStat"><span>Média em repouso</span><b>${meanText(mr)} mmHg</b></div><div class="reportStat"><span>Total de medições</span><b>${a.length}</b></div><div class="reportStat"><span>Dias com registros</span><b>${days.length}</b></div></div></div>`;
- $('ranalysis').innerHTML=`<div class="reportSection"><h2>Médias por período do dia</h2><table class="reportTable"><thead><tr><th>Período</th><th>Registros</th><th>Média (mmHg)</th></tr></thead><tbody>${periodRows}</tbody></table></div>
- <div class="reportSection"><h2>Indicadores estatísticos</h2><table class="reportTable"><tbody>
- <tr><td>Maior sistólica</td><td>${maxSys} mmHg</td><td>Menor sistólica</td><td>${minSys} mmHg</td></tr>
- <tr><td>Maior diastólica</td><td>${maxDia} mmHg</td><td>Menor diastólica</td><td>${minDia} mmHg</td></tr>
- <tr><td>Registros com sistólica ≥ 130 ou diastólica ≥ 80</td><td colspan="3">${above} de ${a.length}</td></tr>
- <tr><td>Medições marcadas como repouso</td><td colspan="3">${rest.length}</td></tr>
- </tbody></table></div>
- <div class="reportSection"><h2>Evolução diária das médias</h2><p style="font-size:9pt">Cada barra representa a média sistólica do dia; os valores ao lado mostram a média sistólica/diastólica.</p><div class="reportBars">${dailyBars}</div></div>
- <div class="reportSection"><h2>Observação para avaliação médica</h2><p style="font-size:9pt;line-height:1.5">${esc(interpretation)}</p><p style="font-size:9pt;line-height:1.5">A referência de 130/80 mmHg é aplicável a avaliações domiciliares padronizadas, como a MRPA. Este relatório reúne os registros do aplicativo e não substitui um exame realizado conforme protocolo, nem estabelece diagnóstico. A interpretação deve considerar técnica de aferição, horários, repouso, medicamentos e histórico clínico.</p></div>`;
- $('rrows').innerHTML=a.map(r=>`<tr><td>${fmt(r.date)}</td><td>${esc(r.time)}</td><td>${esc(r.period)}</td><td>${esc(r.condition||'Não informada')}</td><td>${r.sys}/${r.dia}</td><td>${r.pulse??'Não informado'}</td><td>${esc(r.notes||'')}</td></tr>`).join('');
- tab('relatorio');setTimeout(()=>window.print(),300)
+ y=wrapped(interpretation,L,y,usable,8,'normal',[35,51,49],4.1)+2;
+ y=wrapped('A referência de 130/80 mmHg é aplicável a avaliações domiciliares padronizadas, como a MRPA. Este relatório reúne os registros do aplicativo e não substitui um exame realizado conforme protocolo, nem estabelece diagnóstico. A interpretação deve considerar técnica de aferição, horários, repouso, medicamentos e histórico clínico.',L,y,usable,7.5,'normal',[80,98,94],3.8)+2;
+
+ section('Registros completos');
+ const headers=['Data','Hora','Período','Condição','Pressão','Pulso','Observações'];
+ const widths=[22,13,19,25,20,17,usable-116];
+ const rowHeight=7;
+ // Cabeçalho da tabela repetido quando houver quebra de página.
+ const drawTableHeader=()=>{
+  ensure(11);doc.setFillColor(229,243,241);doc.rect(L,y-4,usable,8,'F');
+  let x=L;headers.forEach((h,i)=>{cell(h,x,y,widths[i],'left',true);x+=widths[i]});y+=5;
+ };
+ drawTableHeader();
+ a.forEach(r=>{
+  const obs=String(r.notes||'').replace(/\s+/g,' ').slice(0,75);
+  const vals=[fmt(r.date),r.time,r.period||'',r.condition||'Não informada',r.sys+'/'+r.dia,r.pulse==null?'--':String(r.pulse),obs];
+  ensure(rowHeight+2);
+  if(y===17)drawTableHeader();
+  let x=L;vals.forEach((v,i)=>{cell(v,x,y,widths[i]);x+=widths[i]});
+  doc.setDrawColor(225,231,229);doc.line(L,y+2,W-R,y+2);y+=rowHeight;
+ });
+ // Rodapé e numeração de páginas.
+ const total=doc.getNumberOfPages();
+ for(let i=1;i<=total;i++){
+  doc.setPage(i);doc.setDrawColor(210,220,217);doc.line(L,H-12,W-R,H-12);
+  text('Minha Pressão • Documento de acompanhamento, não diagnóstico',L,H-7,7,'normal',[100,115,111]);
+  text(i+' / '+total,W-R,H-7,7,'normal',[100,115,111],{align:'right'});
+ }
+ const filename='relatorio-minha-pressao-'+(from||'inicio')+'-'+(to||today())+'.pdf';
+ doc.save(filename);
+ alert('PDF gerado. Verifique a pasta Downloads do celular para abrir ou compartilhar o arquivo.');
 }
 function restoreBackup(event){
  const file=event.target.files&&event.target.files[0];if(!file)return;
